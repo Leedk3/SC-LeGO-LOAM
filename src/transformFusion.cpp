@@ -39,25 +39,28 @@ private:
     ros::NodeHandle nh;
 
     ros::Publisher pubLaserOdometry2;
+    ros::Publisher pubReOdometry;
     ros::Subscriber subLaserOdometry;
     ros::Subscriber subOdomAftMapped;
   
 
     nav_msgs::Odometry laserOdometry2;
+    nav_msgs::Odometry loamOdometry;
     tf::StampedTransform laserOdometryTrans2;
     tf::TransformBroadcaster tfBroadcaster2;
 
-    tf::StampedTransform map_2_camera_init_Trans;
-    tf::TransformBroadcaster tfBroadcasterMap2CameraInit;
-
-    tf::StampedTransform camera_2_base_link_Trans;
-    tf::TransformBroadcaster tfBroadcasterCamera2Baselink;
-
+    tf::StampedTransform laserOdometryTrans3;
+    tf::TransformBroadcaster tfBroadcaster3;
+    
     float transformSum[6];
     float transformIncre[6];
     float transformMapped[6];
     float transformBefMapped[6];
     float transformAftMapped[6];
+
+    double OdometryPrevPose_x;
+    double OdometryPrevPose_y;
+    
 
     std_msgs::Header currentHeader;
 
@@ -66,20 +69,19 @@ public:
     TransformFusion(){
 
         pubLaserOdometry2 = nh.advertise<nav_msgs::Odometry> ("/integrated_to_init", 5);
+        pubReOdometry = nh.advertise<nav_msgs::Odometry> ("/Odometry/loam", 5);
         subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("/laser_odom_to_init", 5, &TransformFusion::laserOdometryHandler, this);
         subOdomAftMapped = nh.subscribe<nav_msgs::Odometry>("/aft_mapped_to_init", 5, &TransformFusion::odomAftMappedHandler, this);
 
-        laserOdometry2.header.frame_id = "/camera_init";
+        laserOdometry2.header.frame_id = "/odom_loam";
         laserOdometry2.child_frame_id = "/camera";
 
-        laserOdometryTrans2.frame_id_ = "/camera_init";
+        laserOdometryTrans2.frame_id_ = "/odom_loam";
         laserOdometryTrans2.child_frame_id_ = "/camera";
 
-        map_2_camera_init_Trans.frame_id_ = "/map";
-        map_2_camera_init_Trans.child_frame_id_ = "/camera_init";
-
-        camera_2_base_link_Trans.frame_id_ = "/camera";
-        camera_2_base_link_Trans.child_frame_id_ = "/base_link";
+        laserOdometryTrans3.frame_id_ = "/odom_loam_";
+        laserOdometryTrans3.child_frame_id_ = "/base_loam_";
+        
 
         for (int i = 0; i < 6; ++i)
         {
@@ -207,12 +209,59 @@ public:
         laserOdometry2.pose.pose.position.x = transformMapped[3];
         laserOdometry2.pose.pose.position.y = transformMapped[4];
         laserOdometry2.pose.pose.position.z = transformMapped[5];
+
         pubLaserOdometry2.publish(laserOdometry2);
+
 
         laserOdometryTrans2.stamp_ = laserOdometry->header.stamp;
         laserOdometryTrans2.setRotation(tf::Quaternion(-geoQuat.y, -geoQuat.z, geoQuat.x, geoQuat.w));
         laserOdometryTrans2.setOrigin(tf::Vector3(transformMapped[3], transformMapped[4], transformMapped[5]));
         tfBroadcaster2.sendTransform(laserOdometryTrans2);
+
+        tf::Transform transform;
+        geometry_msgs::PoseStamped out_pose;
+        double roll_, pitch_, yaw_;
+        transform.setOrigin(tf::Vector3(laserOdometry2.pose.pose.position.x, laserOdometry2.pose.pose.position.y, laserOdometry2.pose.pose.position.z));
+        transform.setRotation(
+            tf::Quaternion(laserOdometry2.pose.pose.orientation.x, laserOdometry2.pose.pose.orientation.y, 
+                           laserOdometry2.pose.pose.orientation.z, laserOdometry2.pose.pose.orientation.w));
+        tf::poseTFToMsg(laserOdometryTrans2, out_pose.pose);
+        tf::Matrix3x3(tf::Quaternion(laserOdometry2.pose.pose.orientation.x, laserOdometry2.pose.pose.orientation.y,
+                                     laserOdometry2.pose.pose.orientation.z, laserOdometry2.pose.pose.orientation.w)).getRPY(roll_, pitch_, yaw_);
+
+        std::cout << "(x,y,z) = (" << out_pose.pose.position.x << ", " << out_pose.pose.position.y <<", " <<out_pose.pose.position.z <<")" << std::endl;
+        std::cout << "(R,P,Y) = (" << roll_ * 57.3 << ", " << pitch_ <<", " << yaw_ <<")" << std::endl;
+
+
+
+
+
+
+
+        loamOdometry.header  = laserOdometry2.header;
+        loamOdometry.header.frame_id = "odom_loam_";
+        loamOdometry.child_frame_id = "base_odom_";
+        loamOdometry.pose.pose.position.x = laserOdometry2.pose.pose.position.z;
+        loamOdometry.pose.pose.position.y = laserOdometry2.pose.pose.position.x;
+        loamOdometry.pose.pose.position.z = laserOdometry2.pose.pose.position.y;
+        double CalculatedYaw = atan2(loamOdometry.pose.pose.position.y - OdometryPrevPose_y, loamOdometry.pose.pose.position.x - OdometryPrevPose_x);
+        OdometryPrevPose_x = loamOdometry.pose.pose.position.x;
+        OdometryPrevPose_y = loamOdometry.pose.pose.position.y;
+        geometry_msgs::Quaternion tfQuat;
+        tfQuat = tf::createQuaternionMsgFromRollPitchYaw(0,0,CalculatedYaw);
+
+        loamOdometry.pose.pose.orientation.x = tfQuat.x;
+        loamOdometry.pose.pose.orientation.y = tfQuat.y;
+        loamOdometry.pose.pose.orientation.z = tfQuat.z;
+        loamOdometry.pose.pose.orientation.w = tfQuat.w;
+        pubReOdometry.publish(loamOdometry);
+
+        laserOdometryTrans3.stamp_ = loamOdometry.header.stamp;
+        laserOdometryTrans3.setRotation(tf::Quaternion(tfQuat.x, tfQuat.y, tfQuat.z, tfQuat.w));
+        laserOdometryTrans3.setOrigin(tf::Vector3(loamOdometry.pose.pose.position.x, loamOdometry.pose.pose.position.y, loamOdometry.pose.pose.position.z));
+        tfBroadcaster3.sendTransform(laserOdometryTrans3);
+
+
     }
 
     void odomAftMappedHandler(const nav_msgs::Odometry::ConstPtr& odomAftMapped)
