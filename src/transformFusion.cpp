@@ -40,17 +40,22 @@ private:
 
     ros::Publisher pubLaserOdometry2;
     ros::Publisher pubReOdometry;
+    ros::Publisher pubOdometryPlane;
     ros::Subscriber subLaserOdometry;
     ros::Subscriber subOdomAftMapped;
   
 
     nav_msgs::Odometry laserOdometry2;
     nav_msgs::Odometry loamOdometry;
+    nav_msgs::Odometry PlaneOdometry;
     tf::StampedTransform laserOdometryTrans2;
     tf::TransformBroadcaster tfBroadcaster2;
 
     tf::StampedTransform laserOdometryTrans3;
     tf::TransformBroadcaster tfBroadcaster3;
+
+    tf::StampedTransform AftMappedTrans;
+    tf::TransformBroadcaster tfBroadcasterAftMapped;
     
     float transformSum[6];
     float transformIncre[6];
@@ -60,16 +65,24 @@ private:
 
     double OdometryPrevPose_x;
     double OdometryPrevPose_y;
-    
+    double PlaneOdometryYaw;
+    double PlaneOdometryX;
+    double PlaneOdometryY;
+    double PosePrevX, PosePrevY, PosePrevZ, PosePrevPrevX, PosePrevPrevY, PosePrevPrevZ;
+    int CountForPlaneOdom;
 
     std_msgs::Header currentHeader;
 
 public:
 
-    TransformFusion(){
+    TransformFusion(): PlaneOdometryX(0), PlaneOdometryY(0), PlaneOdometryYaw(0), 
+                       OdometryPrevPose_x(0), OdometryPrevPose_y(0), CountForPlaneOdom(0),
+                       PosePrevX(0), PosePrevY(0), PosePrevZ(0), PosePrevPrevX(0), PosePrevPrevY(0), PosePrevPrevZ(0)
+    {
 
         pubLaserOdometry2 = nh.advertise<nav_msgs::Odometry> ("/integrated_to_init", 5);
         pubReOdometry = nh.advertise<nav_msgs::Odometry> ("/Odometry/loam", 5);
+        pubOdometryPlane = nh.advertise<nav_msgs::Odometry> ("/Odometry/plane_loam", 5);
         subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("/laser_odom_to_init", 5, &TransformFusion::laserOdometryHandler, this);
         subOdomAftMapped = nh.subscribe<nav_msgs::Odometry>("/aft_mapped_to_init", 5, &TransformFusion::odomAftMappedHandler, this);
 
@@ -78,6 +91,9 @@ public:
 
         laserOdometryTrans2.frame_id_ = "/odom_loam";
         laserOdometryTrans2.child_frame_id_ = "/camera";
+
+        AftMappedTrans.frame_id_ = "/odom_loam";
+        AftMappedTrans.child_frame_id_ = "/camera";
 
         laserOdometryTrans3.frame_id_ = "/odom_loam_";
         laserOdometryTrans3.child_frame_id_ = "/base_loam_";
@@ -91,6 +107,7 @@ public:
             transformBefMapped[i] = 0;
             transformAftMapped[i] = 0;
         }
+        
     }
 
     void transformAssociateToMap()
@@ -212,55 +229,114 @@ public:
 
         pubLaserOdometry2.publish(laserOdometry2);
 
-
         laserOdometryTrans2.stamp_ = laserOdometry->header.stamp;
         laserOdometryTrans2.setRotation(tf::Quaternion(-geoQuat.y, -geoQuat.z, geoQuat.x, geoQuat.w));
         laserOdometryTrans2.setOrigin(tf::Vector3(transformMapped[3], transformMapped[4], transformMapped[5]));
         tfBroadcaster2.sendTransform(laserOdometryTrans2);
 
-        tf::Transform transform;
-        geometry_msgs::PoseStamped out_pose;
-        double roll_, pitch_, yaw_;
-        transform.setOrigin(tf::Vector3(laserOdometry2.pose.pose.position.x, laserOdometry2.pose.pose.position.y, laserOdometry2.pose.pose.position.z));
-        transform.setRotation(
-            tf::Quaternion(laserOdometry2.pose.pose.orientation.x, laserOdometry2.pose.pose.orientation.y, 
-                           laserOdometry2.pose.pose.orientation.z, laserOdometry2.pose.pose.orientation.w));
-        tf::poseTFToMsg(laserOdometryTrans2, out_pose.pose);
-        tf::Matrix3x3(tf::Quaternion(laserOdometry2.pose.pose.orientation.x, laserOdometry2.pose.pose.orientation.y,
-                                     laserOdometry2.pose.pose.orientation.z, laserOdometry2.pose.pose.orientation.w)).getRPY(roll_, pitch_, yaw_);
+    }
+    
+    void PlaneOdometryHandler(const nav_msgs::Odometry::ConstPtr& odomAftMapped)
+    {
+        // geometry_msgs::PoseStamped converted_pose;
+        // tf::Transform transform_camera_to_base;
+        // tf::Transform transform_map_to_odom;
 
-        std::cout << "(x,y,z) = (" << out_pose.pose.position.x << ", " << out_pose.pose.position.y <<", " <<out_pose.pose.position.z <<")" << std::endl;
-        std::cout << "(R,P,Y) = (" << roll_ * 57.3 << ", " << pitch_ <<", " << yaw_ <<")" << std::endl;
+        // transform_camera_to_base.setOrigin(tf::Vector3(0, 0, 0));
+        // transform_camera_to_base.setRotation(tf::Quaternion(-0.5, -0.5, -0.5, 0.5)); //camera to base_loam
+        // transform_map_to_odom.setOrigin(tf::Vector3(0, 0, 0));
+        // transform_map_to_odom.setRotation(tf::Quaternion(0.500, 0.500, 0.500, 0.500)); // map to odom_loam
 
+        // tf::poseTFToMsg(transform_map_to_odom *AftMappedTrans*transform_camera_to_base , converted_pose.pose); //laserOdometryTrans2 --> AftMappedTrans : laserOdometry loop rate is too fast. 
+        // std::cout << converted_pose.pose << std::endl;
+        // if (!std::isnan(converted_pose.pose.position.x) && !std::isinf(converted_pose.pose.position.x))
+        // {
+        //     loamOdometry.header  = laserOdometry2.header;
+        //     loamOdometry.header.frame_id = "odom_loam_";
+        //     loamOdometry.child_frame_id = "base_odom_";
+        //     loamOdometry.pose.pose = converted_pose.pose;
 
+        //     pubReOdometry.publish(loamOdometry);
 
+        //     laserOdometryTrans3.stamp_ = odomAftMapped->header.stamp;
+        //     laserOdometryTrans3.setRotation(tf::Quaternion(converted_pose.pose.orientation.x, converted_pose.pose.orientation.y, converted_pose.pose.orientation.z, converted_pose.pose.orientation.w));
+        //     laserOdometryTrans3.setOrigin(tf::Vector3(converted_pose.pose.position.x, converted_pose.pose.position.y, converted_pose.pose.position.z));
+        //     tfBroadcaster3.sendTransform(laserOdometryTrans3);
+            
+        //     //Inner Product
+        //     double UnitCurDist, UnitPrevDist;
+        //     double ProdInner, angle, DistDelta, angle_sign;
+        //     tf::Vector3 CrossProd;
+        //     geometry_msgs::Vector3 geoVect;
+            
 
+        //     auto UnitCur = tf::Vector3(converted_pose.pose.position.x - PosePrevPrevX, 
+        //                                converted_pose.pose.position.y - PosePrevPrevY, 
+        //                                converted_pose.pose.position.z - PosePrevPrevZ);
+        //     auto UnitPrev = tf::Vector3(PosePrevX - PosePrevPrevX, 
+        //                                 PosePrevY - PosePrevPrevY,
+        //                                 PosePrevZ - PosePrevPrevZ);
+            
+        //     UnitCurDist = tf::tfDistance(tf::Vector3(converted_pose.pose.position.x,converted_pose.pose.position.y,converted_pose.pose.position.z), 
+        //                                 tf::Vector3(PosePrevPrevX,PosePrevPrevY,PosePrevPrevZ));
+        //     UnitPrevDist = tf::tfDistance(tf::Vector3(PosePrevX,PosePrevY,PosePrevZ), 
+        //                                 tf::Vector3(PosePrevPrevX,PosePrevPrevY,PosePrevPrevZ));
 
+        //     DistDelta = sqrt(pow(converted_pose.pose.position.x - PosePrevX, 2) + 
+        //                     pow(converted_pose.pose.position.y - PosePrevY, 2) +  
+        //                     pow(converted_pose.pose.position.z - PosePrevZ, 2));
 
+        //     if (CountForPlaneOdom > 3 )
+        //     {
+        //         ProdInner = tf::tfDot(UnitCur, UnitPrev);
+        //         if (UnitCurDist != 0 && UnitPrevDist != 0)
+        //         {
+        //             angle = acos(ProdInner/ (UnitCurDist * UnitPrevDist));    
+        //         }
+        //         CrossProd = tf::tfCross(UnitCur, UnitPrev);
+        //         vector3TFToMsg(CrossProd, geoVect);
+        //         if (geoVect.z > 0)
+        //         { angle_sign = 1 ;}  
+        //         else
+        //         { angle_sign = -1;}
+                
+        //     }                         
 
-        loamOdometry.header  = laserOdometry2.header;
-        loamOdometry.header.frame_id = "odom_loam_";
-        loamOdometry.child_frame_id = "base_odom_";
-        loamOdometry.pose.pose.position.x = laserOdometry2.pose.pose.position.z;
-        loamOdometry.pose.pose.position.y = laserOdometry2.pose.pose.position.x;
-        loamOdometry.pose.pose.position.z = laserOdometry2.pose.pose.position.y;
-        double CalculatedYaw = atan2(loamOdometry.pose.pose.position.y - OdometryPrevPose_y, loamOdometry.pose.pose.position.x - OdometryPrevPose_x);
-        OdometryPrevPose_x = loamOdometry.pose.pose.position.x;
-        OdometryPrevPose_y = loamOdometry.pose.pose.position.y;
-        geometry_msgs::Quaternion tfQuat;
-        tfQuat = tf::createQuaternionMsgFromRollPitchYaw(0,0,CalculatedYaw);
+        //     PosePrevPrevX = PosePrevX;
+        //     PosePrevPrevY = PosePrevY;
+        //     PosePrevPrevZ = PosePrevZ;
+        //     PosePrevX = converted_pose.pose.position.x;
+        //     PosePrevY = converted_pose.pose.position.y;
+        //     PosePrevZ = converted_pose.pose.position.z;
 
-        loamOdometry.pose.pose.orientation.x = tfQuat.x;
-        loamOdometry.pose.pose.orientation.y = tfQuat.y;
-        loamOdometry.pose.pose.orientation.z = tfQuat.z;
-        loamOdometry.pose.pose.orientation.w = tfQuat.w;
-        pubReOdometry.publish(loamOdometry);
+        //     std::cout << "Prod: " << ProdInner << ", UnitCur: "<< UnitCurDist << ", UnitPrev: " <<  UnitPrevDist<< std::endl;
+        //     std::cout << "cross product : \n" << geoVect <<  "\n Count: "<< CountForPlaneOdom << std::endl;
+        //     //Pub Plane Odometry
+        //     PlaneOdometryYaw = PlaneOdometryYaw + angle * angle_sign;
+        //     if (PlaneOdometryYaw > M_PI * 2)
+        //     {
+        //         PlaneOdometryYaw = PlaneOdometryYaw - 2 * M_PI;
+        //     }
+        //     else if (PlaneOdometryYaw < -M_PI * 2)
+        //     {
+        //         PlaneOdometryYaw = PlaneOdometryYaw + 2 * M_PI;
+        //     }        
+        //     PlaneOdometryX = PlaneOdometryX +  DistDelta * cos(PlaneOdometryYaw);
+        //     PlaneOdometryY = PlaneOdometryY +  DistDelta * sin(PlaneOdometryYaw);
+        //     std::cout << "X: " << PlaneOdometryX << ", Y: " << PlaneOdometryY << ", Yaw: " <<  PlaneOdometryYaw  * 57.3<< std::endl;
+        //     std::cout << "DistDelta: " << DistDelta << ", angle: " <<  angle <<  ", sin: "<< sin(angle) << std::endl;
+            
+        //     PlaneOdometry.header  = odomAftMapped->header;
+        //     PlaneOdometry.header.frame_id = "odom_loam_";
+        //     PlaneOdometry.child_frame_id = "base_odom_";
+        //     PlaneOdometry.pose.pose.position.x = PlaneOdometryX;
+        //     PlaneOdometry.pose.pose.position.y = PlaneOdometryY;
+        //     geometry_msgs::Quaternion PlaneQuat = tf::createQuaternionMsgFromRollPitchYaw(0,0,PlaneOdometryYaw);
+        //     // geometry_msgs::Quaternion PlaneQuatNormalized = PlaneQuat.normalize()
+        //     PlaneOdometry.pose.pose.orientation = PlaneQuat;
 
-        laserOdometryTrans3.stamp_ = loamOdometry.header.stamp;
-        laserOdometryTrans3.setRotation(tf::Quaternion(tfQuat.x, tfQuat.y, tfQuat.z, tfQuat.w));
-        laserOdometryTrans3.setOrigin(tf::Vector3(loamOdometry.pose.pose.position.x, loamOdometry.pose.pose.position.y, loamOdometry.pose.pose.position.z));
-        tfBroadcaster3.sendTransform(laserOdometryTrans3);
-
+        //     pubOdometryPlane.publish(PlaneOdometry);
+        // }
 
     }
 
@@ -285,6 +361,117 @@ public:
         transformBefMapped[3] = odomAftMapped->twist.twist.linear.x;
         transformBefMapped[4] = odomAftMapped->twist.twist.linear.y;
         transformBefMapped[5] = odomAftMapped->twist.twist.linear.z;
+
+        tf::StampedTransform AftMappedTrans;
+        AftMappedTrans.stamp_ = odomAftMapped -> header.stamp;
+        AftMappedTrans.setRotation(tf::Quaternion(-geoQuat.y, -geoQuat.z, geoQuat.x, geoQuat.w));
+        AftMappedTrans.setOrigin(tf::Vector3(odomAftMapped->pose.pose.position.x, odomAftMapped->pose.pose.position.y, odomAftMapped->pose.pose.position.z));
+        
+        
+        // PlaneOdometryHandler(odomAftMapped);
+
+        geometry_msgs::PoseStamped converted_pose;
+        tf::Transform transform_camera_to_base;
+        tf::Transform transform_map_to_odom;
+
+        transform_camera_to_base.setOrigin(tf::Vector3(0, 0, 0));
+        transform_camera_to_base.setRotation(tf::Quaternion(-0.5, -0.5, -0.5, 0.5)); //camera to base_loam
+        transform_map_to_odom.setOrigin(tf::Vector3(0, 0, 0));
+        transform_map_to_odom.setRotation(tf::Quaternion(0.500, 0.500, 0.500, 0.500)); // map to odom_loam
+
+        tf::poseTFToMsg(transform_map_to_odom *AftMappedTrans*transform_camera_to_base , converted_pose.pose); //laserOdometryTrans2 --> AftMappedTrans : laserOdometry loop rate is too fast. 
+        std::cout << converted_pose.pose << std::endl;
+        if (!std::isnan(converted_pose.pose.position.x) && !std::isinf(converted_pose.pose.position.x))
+        {
+            loamOdometry.header  = laserOdometry2.header;
+            loamOdometry.header.frame_id = "odom_loam_";
+            loamOdometry.child_frame_id = "base_odom_";
+            loamOdometry.pose.pose = converted_pose.pose;
+
+            pubReOdometry.publish(loamOdometry);
+
+            laserOdometryTrans3.stamp_ = odomAftMapped->header.stamp;
+            laserOdometryTrans3.setRotation(tf::Quaternion(converted_pose.pose.orientation.x, converted_pose.pose.orientation.y, converted_pose.pose.orientation.z, converted_pose.pose.orientation.w));
+            laserOdometryTrans3.setOrigin(tf::Vector3(converted_pose.pose.position.x, converted_pose.pose.position.y, converted_pose.pose.position.z));
+            tfBroadcaster3.sendTransform(laserOdometryTrans3);
+            
+            //Inner Product
+            double UnitCurDist, UnitPrevDist;
+            double ProdInner, angle, DistDelta, angle_sign;
+            tf::Vector3 CrossProd;
+            geometry_msgs::Vector3 geoVect;
+            
+
+            auto UnitCur = tf::Vector3(converted_pose.pose.position.x - PosePrevPrevX, 
+                                       converted_pose.pose.position.y - PosePrevPrevY, 
+                                       converted_pose.pose.position.z - PosePrevPrevZ);
+            auto UnitPrev = tf::Vector3(PosePrevX - PosePrevPrevX, 
+                                        PosePrevY - PosePrevPrevY,
+                                        PosePrevZ - PosePrevPrevZ);
+            
+            UnitCurDist = tf::tfDistance(tf::Vector3(converted_pose.pose.position.x,converted_pose.pose.position.y,converted_pose.pose.position.z), 
+                                        tf::Vector3(PosePrevPrevX,PosePrevPrevY,PosePrevPrevZ));
+            UnitPrevDist = tf::tfDistance(tf::Vector3(PosePrevX,PosePrevY,PosePrevZ), 
+                                        tf::Vector3(PosePrevPrevX,PosePrevPrevY,PosePrevPrevZ));
+
+            DistDelta = sqrt(pow(converted_pose.pose.position.x - PosePrevX, 2) + 
+                            pow(converted_pose.pose.position.y - PosePrevY, 2) +  
+                            pow(converted_pose.pose.position.z - PosePrevZ, 2));
+
+            if (CountForPlaneOdom > 3 )
+            {
+                ProdInner = tf::tfDot(UnitCur, UnitPrev);
+                if (UnitCurDist != 0 && UnitPrevDist != 0)
+                {
+                    angle = acos(ProdInner/ (UnitCurDist * UnitPrevDist));    
+                }
+                CrossProd = tf::tfCross(UnitCur, UnitPrev);
+                vector3TFToMsg(CrossProd, geoVect);
+                if (geoVect.z > 0)
+                { angle_sign = -1 ;}  
+                else
+                { angle_sign = 1;}
+                
+            }                         
+
+            PosePrevPrevX = PosePrevX;
+            PosePrevPrevY = PosePrevY;
+            PosePrevPrevZ = PosePrevZ;
+            PosePrevX = converted_pose.pose.position.x;
+            PosePrevY = converted_pose.pose.position.y;
+            PosePrevZ = converted_pose.pose.position.z;
+
+            std::cout << "Prod: " << ProdInner << ", UnitCur: "<< UnitCurDist << ", UnitPrev: " <<  UnitPrevDist<< std::endl;
+            std::cout << "cross product : \n" << geoVect <<  "\n Count: "<< CountForPlaneOdom << std::endl;
+            //Pub Plane Odometry
+            PlaneOdometryYaw = PlaneOdometryYaw + angle * angle_sign;
+            if (PlaneOdometryYaw > M_PI * 2)
+            {
+                PlaneOdometryYaw = PlaneOdometryYaw - 2 * M_PI;
+            }
+            else if (PlaneOdometryYaw < -M_PI * 2)
+            {
+                PlaneOdometryYaw = PlaneOdometryYaw + 2 * M_PI;
+            }        
+            PlaneOdometryX = PlaneOdometryX +  DistDelta * cos(PlaneOdometryYaw);
+            PlaneOdometryY = PlaneOdometryY +  DistDelta * sin(PlaneOdometryYaw);
+            std::cout << "X: " << PlaneOdometryX << ", Y: " << PlaneOdometryY << ", Yaw: " <<  PlaneOdometryYaw  * 57.3<< std::endl;
+            std::cout << "DistDelta: " << DistDelta << ", angle: " <<  angle <<  ", sin: "<< sin(angle) << std::endl;
+            
+            PlaneOdometry.header  = odomAftMapped->header;
+            PlaneOdometry.header.frame_id = "odom_loam_";
+            PlaneOdometry.child_frame_id = "base_odom_";
+            PlaneOdometry.pose.pose.position.x = PlaneOdometryX;
+            PlaneOdometry.pose.pose.position.y = PlaneOdometryY;
+            geometry_msgs::Quaternion PlaneQuat = tf::createQuaternionMsgFromRollPitchYaw(0,0,PlaneOdometryYaw);
+            // geometry_msgs::Quaternion PlaneQuatNormalized = PlaneQuat.normalize()
+            PlaneOdometry.pose.pose.orientation = PlaneQuat;
+
+            pubOdometryPlane.publish(PlaneOdometry);
+        }
+
+
+        CountForPlaneOdom ++;
     }
 };
 
@@ -301,3 +488,104 @@ int main(int argc, char** argv)
 
     return 0;
 }
+
+
+        // /* --------------------------------------------------------------------------------------------------------------- */
+        // geometry_msgs::PoseStamped converted_pose;
+        // tf::Transform transform;
+        // transform.setOrigin(tf::Vector3(0, 0, 0));
+        // transform.setRotation(tf::Quaternion(-0.5, -0.5, -0.5, 0.5)); //camera to base_loam
+        // tf::Transform transform_map_to_odom;
+        // transform_map_to_odom.setOrigin(tf::Vector3(0, 0, 0));
+        // transform_map_to_odom.setRotation(tf::Quaternion(0.500, 0.500, 0.500, 0.500)); //camera to base_loam
+
+
+        // tf::poseTFToMsg(transform_map_to_odom *AftMappedTrans*transform , converted_pose.pose); //laserOdometryTrans2 --> AftMappedTrans
+        // std::cout << converted_pose.pose << std::endl;
+
+        // loamOdometry.header  = laserOdometry2.header;
+        // loamOdometry.header.frame_id = "odom_loam_";
+        // loamOdometry.child_frame_id = "base_odom_";
+        // loamOdometry.pose.pose = converted_pose.pose;
+
+        // pubReOdometry.publish(loamOdometry);
+
+        // laserOdometryTrans3.stamp_ = loamOdometry.header.stamp;
+        // laserOdometryTrans3.setRotation(tf::Quaternion(converted_pose.pose.orientation.x, converted_pose.pose.orientation.y, converted_pose.pose.orientation.z, converted_pose.pose.orientation.w));
+        // laserOdometryTrans3.setOrigin(tf::Vector3(converted_pose.pose.position.x, converted_pose.pose.position.y, converted_pose.pose.position.z));
+        // tfBroadcaster3.sendTransform(laserOdometryTrans3);
+        // // CountForPlaneOdom++;
+        // //Inner Product
+
+        // double UnitCurDist, UnitPrevDist;
+        // double ProdInner, angle, DistDelta, angle_sign;
+        // tf::Vector3 CrossProd;
+        // geometry_msgs::Vector3 geoVect;
+
+        // auto UnitCur = tf::Vector3(converted_pose.pose.position.x - PosePrevPrevX, 
+        //                            converted_pose.pose.position.y - PosePrevPrevY, 
+        //                            converted_pose.pose.position.z - PosePrevPrevZ);
+        // auto UnitPrev = tf::Vector3(PosePrevX - PosePrevPrevX, 
+        //                             PosePrevY - PosePrevPrevY,
+        //                             PosePrevZ - PosePrevPrevZ);
+        
+        // UnitCurDist = tf::tfDistance(tf::Vector3(converted_pose.pose.position.x,converted_pose.pose.position.y,converted_pose.pose.position.z), 
+        //                              tf::Vector3(PosePrevPrevX,PosePrevPrevY,PosePrevPrevZ));
+        // UnitPrevDist = tf::tfDistance(tf::Vector3(PosePrevX,PosePrevY,PosePrevZ), 
+        //                               tf::Vector3(PosePrevPrevX,PosePrevPrevY,PosePrevPrevZ));
+
+        // DistDelta = sqrt(pow(converted_pose.pose.position.x - PosePrevX, 2) + 
+        //                  pow(converted_pose.pose.position.y - PosePrevY, 2) +  
+        //                  pow(converted_pose.pose.position.z - PosePrevZ, 2));
+
+        // if (CountForPlaneOdom > 2)
+        // {
+        //     // double angle = tf::tfAngle(UnitCur, UnitPrev);
+        //     ProdInner = tf::tfDot(UnitCur, UnitPrev);
+        //     angle = acos(ProdInner/ (UnitCurDist * UnitPrevDist));
+        //     CrossProd = tf::tfCross(UnitCur, UnitPrev);
+        //     vector3TFToMsg(CrossProd, geoVect);
+        //     if (geoVect.z > 0)
+        //     { angle_sign = 1 ;}  
+        //     else
+        //     { angle_sign = -1;}
+        // }                         
+
+        // PosePrevPrevX = PosePrevX;
+        // PosePrevPrevY = PosePrevY;
+        // PosePrevPrevZ = PosePrevZ;
+        // PosePrevX = converted_pose.pose.position.x;
+        // PosePrevY = converted_pose.pose.position.y;
+        // PosePrevZ = converted_pose.pose.position.z;
+
+        // std::cout << "Prod: " << ProdInner << ", UnitCur: "<< UnitCurDist << ", UnitPrev: " <<  UnitPrevDist<< std::endl;
+        // std::cout << "cross product : " << geoVect << std::endl;
+        // //Pub Plane Odometry
+        // PlaneOdometryYaw = PlaneOdometryYaw + angle * angle_sign;
+        // if (PlaneOdometryYaw > M_PI * 2)
+        // {
+        //     PlaneOdometryYaw = PlaneOdometryYaw - 2 * M_PI;
+        // }
+        // else if (PlaneOdometryYaw < -M_PI * 2)
+        // {
+        //     PlaneOdometryYaw = PlaneOdometryYaw + 2 * M_PI;
+        // }        
+        // PlaneOdometryX = PlaneOdometryX +  DistDelta * cos(PlaneOdometryYaw);
+        // PlaneOdometryY = PlaneOdometryY +  DistDelta * sin(PlaneOdometryYaw);
+        // std::cout << "X: " << PlaneOdometryX << ", Y: " << PlaneOdometryY << ", Yaw: " <<  PlaneOdometryYaw  * 57.3<< std::endl;
+        // std::cout << "DistDelta: " << DistDelta << ", angle: " <<  angle <<  ", sin: "<< sin(angle) << std::endl;
+        
+
+        // PlaneOdometry.header  = laserOdometry2.header;
+        // PlaneOdometry.header.frame_id = "odom_loam_";
+        // PlaneOdometry.child_frame_id = "base_odom_";
+        // PlaneOdometry.pose.pose.position.x = PlaneOdometryX;
+        // PlaneOdometry.pose.pose.position.y = PlaneOdometryY;
+
+        // geometry_msgs::Quaternion PlaneQuat = tf::createQuaternionMsgFromRollPitchYaw(0,0,PlaneOdometryYaw);
+        // PlaneOdometry.pose.pose.orientation = PlaneQuat;
+
+        // pubOdometryPlane.publish(PlaneOdometry);
+
+
+        // /* ------------------------------------------------------------------------------------------------------------------------- */
