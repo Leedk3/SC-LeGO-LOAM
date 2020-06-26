@@ -437,8 +437,8 @@ Visualization Manager:
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 61.27479553222656
-        Min Value: -4.476079940795898
+        Max Value: 28.386066436767578
+        Min Value: -0.9344104528427124
         Value: true
       Axis: Y
       Channel Name: intensity
@@ -555,7 +555,7 @@ Visualization Manager:
         Shaft Length: 1
         Shaft Radius: 0.05000000074505806
         Value: Arrow
-      Topic: /Odometry/loam
+      Topic: /Odometry/loam/aft_mapped
       Unreliable: false
       Value: true
     - Alpha: 0.5
@@ -607,7 +607,7 @@ Visualization Manager:
         Shaft Length: 1
         Shaft Radius: 0.05000000074505806
         Value: Arrow
-      Topic: /Odometry/plane_loam
+      Topic: /Odometry/loam/plane
       Unreliable: false
       Value: true
   Enabled: true
@@ -626,25 +626,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 912.2792358398438
+      Distance: 158.43357849121094
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -74.73313903808594
-        Y: 77.69141387939453
-        Z: 4.882798194885254
+        X: -22.015464782714844
+        Y: -4.393091678619385
+        Z: -6.919229030609131
       Focal Shape Fixed Size: false
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.994796872138977
+      Pitch: 1.5697963237762451
       Target Frame: base_loam
       Value: Orbit (rviz)
-      Yaw: 4.190399169921875
+      Yaw: 3.1803998947143555
     Saved: ~
 Window Geometry:
   Displays:
